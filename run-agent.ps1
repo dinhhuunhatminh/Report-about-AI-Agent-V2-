@@ -4,7 +4,7 @@
 
 param(
     [string]$RepoPath   = $PSScriptRoot,   # the whole ResearchAI-AGENT folder is the repo
-    [string]$Branch     = 'auto/ci',
+    [string]$Branch     = 'main',      # user approved direct pushes to main
     [string]$TestCmd    = '',          # e.g. 'npm test' or 'python -m pytest'; empty = skip tests
     [int]$MaxTurns      = 12,
     [int]$LockMaxMinutes = 60
