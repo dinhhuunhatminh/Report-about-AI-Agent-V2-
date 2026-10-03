@@ -931,7 +931,7 @@ Một agent không có log thì không gỡ lỗi được, và không có eval 
 <h2 id="p8">9. Báo cáo project test: agent CI/CD <span class="tag done">đã viết</span></h2>
 
 <h3 id="s9-1">9.1 Mục tiêu và tổng quan</h3>
-<p>Project test xây một agent CI/CD đơn giản: <b>mỗi ngày vào giờ đã đặt, tự kiểm tra thư mục project, nếu có thay đổi thì commit và push lên GitHub</b>. Mục tiêu là áp dụng các khái niệm ở các phần 1 đến 8 vào một bài toán thật, ở quy mô nhỏ.</p>
+<p>Project test xây một agent CI/CD đơn giản: <b>mỗi ngày vào giờ đã đặt, tự kiểm tra thư mục project, nếu có thay đổi thì commit, push lên GitHub và kiểm tra trang web đã được deploy</b>. Mục tiêu là áp dụng các khái niệm ở các phần 1 đến 8 vào một bài toán thật, ở quy mô nhỏ.</p>
 <table>
   <tr><th>Hạng mục</th><th>Lựa chọn</th></tr>
   <tr><td>LLM</td><td>Claude, qua <b>Claude Code CLI</b> ở chế độ không giao diện (<code>claude -p</code>), dùng đăng nhập gói Pro, không dùng API key</td></tr>
@@ -939,7 +939,7 @@ Một agent không có log thì không gỡ lỗi được, và không có eval 
   <tr><td>Lịch</td><td>01:20 mỗi ngày</td></tr>
   <tr><td>Repo đích</td><td>GitHub <code>dinhhuunhatminh/Report-about-AI-Agent-V2-</code>, nhánh <code>main</code></td></tr>
   <tr><td>Phạm vi repo</td><td>Toàn bộ thư mục <code>ResearchAI-AGENT</code> (trừ <code>logs/</code> và <code>state.json</code>)</td></tr>
-  <tr><td>Deploy</td><td>Chưa có. Mới dừng ở commit và push</td></tr>
+  <tr><td>Deploy</td><td>GitHub Pages, lấy từ nhánh <code>main</code>, thư mục <code>/docs</code>. Địa chỉ: <code>https://dinhhuunhatminh.github.io/Report-about-AI-Agent-V2-/</code></td></tr>
 </table>
 <div class="note"><strong>Cách hiểu đúng về loại agent này</strong>
 Đây là <b>workflow lai</b> (mục 4.1): khung chạy cố định do script lo, Claude chỉ làm phần cần hiểu ngôn ngữ (đọc thay đổi, viết commit message, commit, push). Vòng lặp agent bên trong do Claude Code CLI đảm nhiệm, chưa phải vòng lặp tự viết như mục 2.4.</div>
@@ -955,6 +955,7 @@ Một agent không có log thì không gỡ lỗi được, và không có eval 
 ├─ logs/                           ← nhật ký mỗi lần chạy, file khóa (không commit)
 │  └─ run-YYYYMMDD-HHMMSS.log
 └─ docs/
+   ├─ index.html                   ← trang gốc của site, chuyển tới báo cáo
    ├─ bao-cao-agent.html           ← báo cáo này
    ├─ 01-khung-hoc.md              ← khung học theo takenote ban đầu
    └─ mcp.example.json             ← ví dụ cấu hình MCP, hiện không dùng</div>
@@ -991,11 +992,15 @@ run-agent.ps1
         ▼
   7. Xác minh        ── commit mới có thật? remote đã nhận đúng commit? còn file sót lại không?
         │
-  8. Ghi kết quả     ── state.json + logs/run-*.log, nhả khóa</div>
+  8. Kiểm tra deploy ── GitHub tự xây lại Pages sau mỗi push; script chờ tối đa 8 phút:
+        │                build thành công và trang trả HTTP 200? ── không ──► ghi "deploy_failed"
+        ▼
+  9. Ghi kết quả     ── state.json + logs/run-*.log, nhả khóa</div>
 <ul>
   <li><b>Tiết kiệm hạn mức:</b> bước 3 chặn sớm nên ngày nào không có thay đổi thì không gọi Claude, không tốn hạn mức Pro.</li>
   <li><b>Không tin lời tự báo cáo của model:</b> bước 7 do script tự kiểm tra bằng git (<code>git rev-parse</code>, <code>git ls-remote</code>), không dựa vào câu "đã push xong" của Claude.</li>
-  <li><b>Kết quả có thể là:</b> <code>ok</code>, <code>no_changes</code>, <code>tests_failed</code>, <code>failed_verification</code>, <code>error</code>. Mã thoát khác 0 khi không thành công.</li>
+  <li><b>Kết quả có thể là:</b> <code>ok</code>, <code>no_changes</code>, <code>tests_failed</code>, <code>failed_verification</code>, <code>deploy_failed</code>, <code>error</code>. Mã thoát khác 0 khi không thành công.</li>
+  <li><b>Cách deploy hoạt động:</b> script không tự deploy. GitHub Pages tự chạy một workflow tên "pages build and deployment" sau mỗi lần push vào <code>main</code>. Script chỉ hỏi API công khai của GitHub (không cần token vì repo public) để biết workflow của <b>đúng commit vừa push</b> đã xong chưa, rồi gọi thử địa chỉ trang.</li>
 </ul>
 
 <h3 id="s9-5">9.5 Phân vai giữa code, Claude và người</h3>
@@ -1037,8 +1042,13 @@ run-agent.ps1
   <tr><td>4</td><td>Sau khi chuyển <code>.mcp.json</code> thành file ví dụ (đã kiểm tra không có bí mật)</td><td><code>ok</code>: commit 9 file, push thành công</td></tr>
   <tr><td>5</td><td>Đổi nhánh đích sang <code>main</code></td><td><code>ok</code>: agent tự commit chính thay đổi cấu hình này và push vào <code>main</code>, khoảng 17 giây, 3 lượt</td></tr>
 </table>
+<table>
+  <tr><th>Lần thử</th><th>Tình huống</th><th>Kết quả</th></tr>
+  <tr><td>6</td><td><b>Lần chạy theo lịch thật đầu tiên</b> (Task Scheduler, 01:20)</td><td><code>ok</code>: agent commit và push phần 9 của báo cáo. Xác nhận lịch hoạt động</td></tr>
+  <tr><td>7</td><td>Bật GitHub Pages, thêm bước kiểm tra deploy và <code>docs/index.html</code></td><td><code>ok</code>: commit và push thành công, rồi script chờ khoảng 1 phút, ghi <code>deploy_status: ok</code> (Pages build thành công, trang trả HTTP 200)</td></tr>
+</table>
 <p>Mỗi lần gọi Claude tốn khoảng 3 đến 5 lượt và khoảng 0,07 đến 0,09 USD quy đổi theo giá API. Với gói Pro, đây không phải khoản tiền phải trả, chỉ là phần hạn mức bị trừ.</p>
-<p>Chưa được kiểm chứng: lần chạy tự động theo lịch của Task Scheduler (các lần trên đều chạy tay), và hai tình huống lỗi cố ý (test fail, file chứa lệnh độc).</p>
+<p>Chưa được kiểm chứng: hai tình huống lỗi cố ý (test fail, file chứa lệnh độc) và nhánh <code>deploy_failed</code> (build Pages lỗi).</p>
 
 <h3 id="s9-9">9.9 Hạn chế và việc tiếp theo</h3>
 <table>
@@ -1048,7 +1058,8 @@ run-agent.ps1
   <tr><td>Repo có vẻ công khai, mọi file trong thư mục đều xem được</td><td>Chuyển repo sang private nếu không muốn công khai</td></tr>
   <tr><td>Chưa có trace từng bước, chỉ lưu đầu ra thô và tóm tắt</td><td>Ghi <code>trace.jsonl</code> như mục 8.2 khi chuyển sang agent tự viết</td></tr>
   <tr><td>Chưa có bộ eval cho các tình huống lỗi và lệnh độc</td><td>Dựng 4 đến 5 bài test như mục 8.4</td></tr>
-  <tr><td>Chưa có bước deploy</td><td>Thêm sau khi đã có đích deploy (ví dụ GitHub Pages)</td></tr>
+  <tr><td>Deploy chỉ là site tĩnh trên GitHub Pages, và trang là công khai</td><td>Muốn deploy ứng dụng thật (VPS, Docker) thì thiết kế lại bước 8. Muốn trang riêng tư cần gói GitHub trả phí</td></tr>
+  <tr><td>Kiểm tra deploy dựa vào API công khai, giới hạn 60 lần gọi mỗi giờ và chỉ dùng được với repo public</td><td>Nếu đổi sang repo private thì cần token</td></tr>
   <tr><td>Chỉ chạy khi máy bật và đã đăng nhập</td><td>Cân nhắc GitHub Actions nếu muốn chạy không cần máy</td></tr>
   <tr><td>Phụ thuộc vào hạn mức và điều khoản của gói Pro</td><td>Kiểm tra lại điều khoản dùng Pro cho tự động hóa. Muốn học phần vòng lặp tự viết thì cần API key riêng</td></tr>
   <tr><td>Vòng lặp agent do Claude Code CLI lo, chưa tự viết</td><td>Bản "agent tự viết" ở mục 2.4 là bước học tiếp theo, cần API key</td></tr>
