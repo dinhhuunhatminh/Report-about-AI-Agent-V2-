@@ -1,0 +1,4 @@
+# runtime data written by run-agent.ps1 after each run; must not be committed or every run would see 'changes'
+logs/
+state.json
+
