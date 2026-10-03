@@ -7,7 +7,9 @@ param(
     [string]$Branch     = 'main',      # user approved direct pushes to main
     [string]$TestCmd    = '',          # e.g. 'npm test' or 'python -m pytest'; empty = skip tests
     [int]$MaxTurns      = 12,
-    [int]$LockMaxMinutes = 60
+    [int]$LockMaxMinutes = 60,
+    [bool]$DeployCheck  = $true,       # wait for the GitHub Pages build after pushing
+    [int]$DeployWaitMinutes = 8
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,6 +35,43 @@ function Save-State($result, $extra) {
     }
     foreach ($k in $extra.Keys) { $state[$k] = $extra[$k] }
     $state | ConvertTo-Json | Set-Content -Path $StateFile -Encoding utf8
+}
+
+# Wait for the GitHub Pages build of $sha, then check the site answers.
+# Uses the public GitHub API (no token needed for public repos, limit 60 requests/hour).
+function Wait-PagesDeploy([string]$sha) {
+    $remoteUrl = (git remote get-url origin).Trim()
+    if ($remoteUrl -notmatch 'github\.com[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(\.git)?$') {
+        return @{ status = 'skipped'; url = ''; detail = "origin is not a github.com url" }
+    }
+    $owner = $Matches['owner']; $repo = $Matches['repo']
+    $siteUrl = "https://$($owner.ToLower()).github.io/$repo/"
+    $api = "https://api.github.com/repos/$owner/$repo/actions/runs?head_sha=$sha&per_page=20"
+    $headers = @{ 'User-Agent' = 'cicd-agent' }
+    $deadline = (Get-Date).AddMinutes($DeployWaitMinutes)
+    $detail = 'no Pages build found for this commit (is GitHub Pages enabled?)'
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $runs = (Invoke-RestMethod $api -Headers $headers).workflow_runs |
+                Where-Object { $_.name -eq 'pages build and deployment' } | Select-Object -First 1
+            if ($runs) {
+                if ($runs.status -eq 'completed') {
+                    if ($runs.conclusion -ne 'success') {
+                        return @{ status = 'failed'; url = $siteUrl; detail = "Pages build concluded: $($runs.conclusion) ($($runs.html_url))" }
+                    }
+                    try {
+                        $code = (Invoke-WebRequest $siteUrl -UseBasicParsing).StatusCode
+                        return @{ status = 'ok'; url = $siteUrl; detail = "Pages build success, site HTTP $code" }
+                    } catch {
+                        return @{ status = 'failed'; url = $siteUrl; detail = "Pages build success but site check failed: $($_.Exception.Message)" }
+                    }
+                }
+                $detail = "Pages build still $($runs.status)"
+            }
+        } catch { $detail = "API error: $($_.Exception.Message)" }
+        Start-Sleep -Seconds 15
+    }
+    return @{ status = 'timeout'; url = $siteUrl; detail = $detail }
 }
 
 # ---- lock: never two runs at once ----
@@ -118,6 +157,19 @@ try {
 
     if ($after -ne $before -and $pushed -and -not $left) {
         Log "OK: committed $after and pushed to origin/$Branch"
+
+        # ---- step 6: deploy check (GitHub Pages builds automatically on every push) ----
+        if ($DeployCheck) {
+            $dep = Wait-PagesDeploy $after
+            $extra.deploy_status = $dep.status
+            $extra.deploy_url    = $dep.url
+            $extra.deploy_detail = $dep.detail
+            Log "Deploy: $($dep.status) - $($dep.detail)"
+            if ($dep.status -ne 'ok') {
+                Save-State 'deploy_failed' $extra
+                exit 1
+            }
+        }
         Save-State 'ok' $extra
         exit 0
     }
