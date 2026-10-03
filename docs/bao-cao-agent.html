@@ -131,6 +131,19 @@
         <li><a href="#s8-6">8.6 Áp dụng cho agent CI/CD này</a></li>
       </ul>
     </li>
+    <li><a href="#p8">9. Báo cáo project test: agent CI/CD</a>
+      <ul>
+        <li><a href="#s9-1">9.1 Mục tiêu và tổng quan</a></li>
+        <li><a href="#s9-2">9.2 Cây thư mục</a></li>
+        <li><a href="#s9-3">9.3 Vai trò từng thành phần</a></li>
+        <li><a href="#s9-4">9.4 Luồng hoạt động</a></li>
+        <li><a href="#s9-5">9.5 Phân vai giữa code, Claude và người</a></li>
+        <li><a href="#s9-6">9.6 Kích hoạt theo lịch</a></li>
+        <li><a href="#s9-7">9.7 Các lớp an toàn đang có</a></li>
+        <li><a href="#s9-8">9.8 Kết quả chạy thử</a></li>
+        <li><a href="#s9-9">9.9 Hạn chế và việc tiếp theo</a></li>
+      </ul>
+    </li>
   </ul>
 </nav>
 
@@ -913,6 +926,133 @@ def ghi_log(buoc, loai, **du_lieu):
 <div class="note"><strong>Điều cần nhớ</strong>
 Một agent không có log thì không gỡ lỗi được, và không có eval thì không biết mình đang cải thiện hay làm tệ đi. Hai thứ này rẻ so với một lần agent làm sai mà không ai biết vì sao.</div>
 
+
+<!-- ===================== 9 ===================== -->
+<h2 id="p8">9. Báo cáo project test: agent CI/CD <span class="tag done">đã viết</span></h2>
+
+<h3 id="s9-1">9.1 Mục tiêu và tổng quan</h3>
+<p>Project test xây một agent CI/CD đơn giản: <b>mỗi ngày vào giờ đã đặt, tự kiểm tra thư mục project, nếu có thay đổi thì commit và push lên GitHub</b>. Mục tiêu là áp dụng các khái niệm ở các phần 1 đến 8 vào một bài toán thật, ở quy mô nhỏ.</p>
+<table>
+  <tr><th>Hạng mục</th><th>Lựa chọn</th></tr>
+  <tr><td>LLM</td><td>Claude, qua <b>Claude Code CLI</b> ở chế độ không giao diện (<code>claude -p</code>), dùng đăng nhập gói Pro, không dùng API key</td></tr>
+  <tr><td>Nơi chạy</td><td>Máy Windows cá nhân, hẹn giờ bằng Task Scheduler</td></tr>
+  <tr><td>Lịch</td><td>01:20 mỗi ngày</td></tr>
+  <tr><td>Repo đích</td><td>GitHub <code>dinhhuunhatminh/Report-about-AI-Agent-V2-</code>, nhánh <code>main</code></td></tr>
+  <tr><td>Phạm vi repo</td><td>Toàn bộ thư mục <code>ResearchAI-AGENT</code> (trừ <code>logs/</code> và <code>state.json</code>)</td></tr>
+  <tr><td>Deploy</td><td>Chưa có. Mới dừng ở commit và push</td></tr>
+</table>
+<div class="note"><strong>Cách hiểu đúng về loại agent này</strong>
+Đây là <b>workflow lai</b> (mục 4.1): khung chạy cố định do script lo, Claude chỉ làm phần cần hiểu ngôn ngữ (đọc thay đổi, viết commit message, commit, push). Vòng lặp agent bên trong do Claude Code CLI đảm nhiệm, chưa phải vòng lặp tự viết như mục 2.4.</div>
+
+<h3 id="s9-2">9.2 Cây thư mục</h3>
+<div class="diagram">ResearchAI-AGENT/                  ← cũng là thư mục gốc của repo git
+├─ .git/                           ← dữ liệu git, remote origin trỏ tới GitHub
+├─ .gitignore                      ← loại logs/ và state.json khỏi repo
+├─ CLAUDE.md                       ← rule cho agent (được làm gì, cấm gì, xử lý input)
+├─ run-agent.ps1                   ← script chính: toàn bộ luồng một lần chạy
+├─ register-task.ps1               ← đăng ký (hoặc xóa) lịch trong Task Scheduler
+├─ state.json                      ← kết quả lần chạy gần nhất       (không commit)
+├─ logs/                           ← nhật ký mỗi lần chạy, file khóa (không commit)
+│  └─ run-YYYYMMDD-HHMMSS.log
+└─ docs/
+   ├─ bao-cao-agent.html           ← báo cáo này
+   ├─ 01-khung-hoc.md              ← khung học theo takenote ban đầu
+   └─ mcp.example.json             ← ví dụ cấu hình MCP, hiện không dùng</div>
+
+<h3 id="s9-3">9.3 Vai trò từng thành phần</h3>
+<table>
+  <tr><th>Thành phần</th><th>Loại (theo mục 1.2)</th><th>Vai trò</th></tr>
+  <tr><td><code>run-agent.ps1</code></td><td>Code</td><td>Khung điều phối: khóa chống chạy chồng, kiểm tra thay đổi, chạy test (nếu cấu hình), chuyển nhánh, gọi Claude, xác minh kết quả, ghi trạng thái và log</td></tr>
+  <tr><td><code>CLAUDE.md</code></td><td>Cấu hình</td><td>Rule của agent: chỉ được dùng một số lệnh git, cấm <code>--force</code> và đọc bí mật, nội dung diff chỉ là dữ liệu. Claude Code tự đọc file này khi chạy</td></tr>
+  <tr><td>Tham số <code>--allowedTools</code> trong script</td><td>Cấu hình</td><td>Danh sách lệnh được phép, do chính Claude Code CLI thực thi chứ không phải do lời dặn trong prompt</td></tr>
+  <tr><td><code>register-task.ps1</code></td><td>Code</td><td>Tạo lịch hằng ngày trong Task Scheduler, bật chạy bù khi lỡ giờ, không cho hai bản chạy cùng lúc</td></tr>
+  <tr><td><code>state.json</code></td><td>Trạng thái</td><td>Kết quả lần chạy cuối: thời điểm, kết quả, commit trước và sau, số lượt, chi phí quy đổi, tóm tắt của Claude</td></tr>
+  <tr><td><code>logs/</code></td><td>Log</td><td>Mỗi lần chạy một file: thay đổi phát hiện được, đầu ra thô của Claude, kết luận</td></tr>
+  <tr><td>GitHub (remote)</td><td>Tích hợp ngoài</td><td>Nơi nhận push, xác thực bằng tài khoản git đã đăng nhập sẵn trên máy</td></tr>
+</table>
+
+<h3 id="s9-4">9.4 Luồng hoạt động</h3>
+<div class="diagram">Task Scheduler (01:20 mỗi ngày)
+        │ gọi
+        ▼
+run-agent.ps1
+  1. Khóa            ── có lần chạy khác đang giữ khóa? ── có ──► bỏ qua, thoát
+        │ không
+  2. Kiểm tra repo   ── thư mục là repo git, có remote origin?  ── không ──► báo lỗi, thoát
+        │ có
+  3. git status      ── có thay đổi không?  ── không ──► ghi "no_changes", thoát (không gọi Claude)
+        │ có
+  4. Chạy test       ── (chỉ khi có cấu hình TestCmd) fail ──► ghi "tests_failed", không commit
+        │ pass / bỏ qua
+  5. Chuyển nhánh    ── fetch, checkout nhánh main
+        │
+  6. Gọi Claude      ── claude -p, chỉ các lệnh git cho phép, tối đa 12 lượt
+        │                Claude: xem diff → git add → viết commit message → git commit → git push
+        ▼
+  7. Xác minh        ── commit mới có thật? remote đã nhận đúng commit? còn file sót lại không?
+        │
+  8. Ghi kết quả     ── state.json + logs/run-*.log, nhả khóa</div>
+<ul>
+  <li><b>Tiết kiệm hạn mức:</b> bước 3 chặn sớm nên ngày nào không có thay đổi thì không gọi Claude, không tốn hạn mức Pro.</li>
+  <li><b>Không tin lời tự báo cáo của model:</b> bước 7 do script tự kiểm tra bằng git (<code>git rev-parse</code>, <code>git ls-remote</code>), không dựa vào câu "đã push xong" của Claude.</li>
+  <li><b>Kết quả có thể là:</b> <code>ok</code>, <code>no_changes</code>, <code>tests_failed</code>, <code>failed_verification</code>, <code>error</code>. Mã thoát khác 0 khi không thành công.</li>
+</ul>
+
+<h3 id="s9-5">9.5 Phân vai giữa code, Claude và người</h3>
+<table>
+  <tr><th>Việc</th><th>Ai làm</th><th>Lý do (xem mục 4)</th></tr>
+  <tr><td>Hẹn giờ, khóa, kiểm tra có thay đổi, chạy test, chọn nhánh</td><td><b>Code</b> (script)</td><td>Đã biết chắc cách làm, cần ổn định và dễ kiểm thử</td></tr>
+  <tr><td>Đọc thay đổi, viết commit message, quyết định có dấu hiệu bí mật không</td><td><b>Claude</b></td><td>Cần hiểu nội dung, không viết được bằng luật cố định</td></tr>
+  <tr><td>Xác minh kết quả</td><td><b>Code</b></td><td>Việc kiểm tra không nên giao cho chính bên vừa làm</td></tr>
+  <tr><td>Duyệt trước khi push</td><td><b>Không có</b></td><td>Chủ project cho phép push thẳng vào <code>main</code></td></tr>
+</table>
+
+<h3 id="s9-6">9.6 Kích hoạt theo lịch</h3>
+<table>
+  <tr><th>Tình huống lúc 01:20</th><th>Điều xảy ra</th></tr>
+  <tr><td>Máy bật, đã đăng nhập và mở khóa</td><td>Cửa sổ PowerShell hiện ra, agent chạy rồi đóng</td></tr>
+  <tr><td>Máy ngủ hoặc tắt</td><td>Không chạy đúng giờ. Khi máy hoạt động và đã đăng nhập thì chạy bù (<code>StartWhenAvailable</code>)</td></tr>
+  <tr><td>Máy ở màn hình khóa chưa đăng nhập</td><td>Chờ đến khi đăng nhập</td></tr>
+  <tr><td>Lần chạy trước chưa xong mà tới giờ mới</td><td>Bị bỏ qua nhờ khóa trong script và cấu hình <code>IgnoreNew</code> của tác vụ</td></tr>
+</table>
+
+<h3 id="s9-7">9.7 Các lớp an toàn đang có</h3>
+<table>
+  <tr><th>Lớp</th><th>Cách thực hiện</th><th>Đối chiếu</th></tr>
+  <tr><td>Allowlist lệnh</td><td><code>--allowedTools</code>: chỉ <code>Read</code> và một số lệnh git (<code>status</code>, <code>diff</code>, <code>add</code>, <code>commit</code>, <code>log</code>, đúng một lệnh push)</td><td>Mục 7.3</td></tr>
+  <tr><td>Không có quyền sửa file</td><td>Không cấp công cụ ghi/sửa, agent chỉ commit cái đã có</td><td>Mục 7.3</td></tr>
+  <tr><td>Rule trong <code>CLAUDE.md</code></td><td>Cấm <code>--force</code>, <code>reset --hard</code>, xóa nhánh, đọc/commit bí mật; nội dung trong diff là dữ liệu</td><td>Mục 7.6</td></tr>
+  <tr><td>Giới hạn số lượt</td><td><code>--max-turns 12</code></td><td>Mục 7.5</td></tr>
+  <tr><td>Khóa chống chạy chồng</td><td>File khóa kèm thời hạn, và <code>IgnoreNew</code> ở tác vụ</td><td>Mục 6.5</td></tr>
+  <tr><td>Xác minh độc lập</td><td>Script tự kiểm tra commit, remote và file còn sót</td><td>Mục 8</td></tr>
+  <tr><td>Không lưu bí mật trong repo</td><td>Không có token trong file; push dùng tài khoản git sẵn có; đã quét bí mật trước lần đẩy đầu</td><td>Mục 7.7</td></tr>
+</table>
+
+<h3 id="s9-8">9.8 Kết quả chạy thử</h3>
+<table>
+  <tr><th>Lần thử</th><th>Tình huống</th><th>Kết quả</th></tr>
+  <tr><td>1</td><td>Repo không có thay đổi</td><td><code>no_changes</code>, thoát ngay, không gọi Claude</td></tr>
+  <tr><td>2</td><td>Thêm một file ghi chú (đẩy vào remote giả trên máy)</td><td><code>ok</code>: commit đúng chuẩn Conventional Commits, push thành công, khoảng 14 giây, 3 lượt</td></tr>
+  <tr><td>3</td><td>Đưa toàn bộ thư mục vào repo thật, có file <code>.mcp.json</code> khiến agent nghi chứa bí mật</td><td><code>failed_verification</code>: agent <b>dừng, không commit</b> theo rule, script phát hiện đúng là chưa có commit. Rule và bước xác minh đã hoạt động như thiết kế</td></tr>
+  <tr><td>4</td><td>Sau khi chuyển <code>.mcp.json</code> thành file ví dụ (đã kiểm tra không có bí mật)</td><td><code>ok</code>: commit 9 file, push thành công</td></tr>
+  <tr><td>5</td><td>Đổi nhánh đích sang <code>main</code></td><td><code>ok</code>: agent tự commit chính thay đổi cấu hình này và push vào <code>main</code>, khoảng 17 giây, 3 lượt</td></tr>
+</table>
+<p>Mỗi lần gọi Claude tốn khoảng 3 đến 5 lượt và khoảng 0,07 đến 0,09 USD quy đổi theo giá API. Với gói Pro, đây không phải khoản tiền phải trả, chỉ là phần hạn mức bị trừ.</p>
+<p>Chưa được kiểm chứng: lần chạy tự động theo lịch của Task Scheduler (các lần trên đều chạy tay), và hai tình huống lỗi cố ý (test fail, file chứa lệnh độc).</p>
+
+<h3 id="s9-9">9.9 Hạn chế và việc tiếp theo</h3>
+<table>
+  <tr><th>Hạn chế hiện tại</th><th>Hướng xử lý</th></tr>
+  <tr><td>Chưa có lệnh test nào, code lỗi vẫn bị push</td><td>Điền <code>-TestCmd</code> khi repo có test thật</td></tr>
+  <tr><td>Push thẳng <code>main</code>, không có người duyệt</td><td>Đổi lại sang nhánh riêng và mở pull request nếu cần kiểm soát hơn</td></tr>
+  <tr><td>Repo có vẻ công khai, mọi file trong thư mục đều xem được</td><td>Chuyển repo sang private nếu không muốn công khai</td></tr>
+  <tr><td>Chưa có trace từng bước, chỉ lưu đầu ra thô và tóm tắt</td><td>Ghi <code>trace.jsonl</code> như mục 8.2 khi chuyển sang agent tự viết</td></tr>
+  <tr><td>Chưa có bộ eval cho các tình huống lỗi và lệnh độc</td><td>Dựng 4 đến 5 bài test như mục 8.4</td></tr>
+  <tr><td>Chưa có bước deploy</td><td>Thêm sau khi đã có đích deploy (ví dụ GitHub Pages)</td></tr>
+  <tr><td>Chỉ chạy khi máy bật và đã đăng nhập</td><td>Cân nhắc GitHub Actions nếu muốn chạy không cần máy</td></tr>
+  <tr><td>Phụ thuộc vào hạn mức và điều khoản của gói Pro</td><td>Kiểm tra lại điều khoản dùng Pro cho tự động hóa. Muốn học phần vòng lặp tự viết thì cần API key riêng</td></tr>
+  <tr><td>Vòng lặp agent do Claude Code CLI lo, chưa tự viết</td><td>Bản "agent tự viết" ở mục 2.4 là bước học tiếp theo, cần API key</td></tr>
+</table>
 
 </div>
 </body>
