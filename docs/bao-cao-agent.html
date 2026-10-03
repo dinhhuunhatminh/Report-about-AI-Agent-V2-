@@ -936,7 +936,7 @@ Một agent không có log thì không gỡ lỗi được, và không có eval 
   <tr><th>Hạng mục</th><th>Lựa chọn</th></tr>
   <tr><td>LLM</td><td>Claude, qua <b>Claude Code CLI</b> ở chế độ không giao diện (<code>claude -p</code>), dùng đăng nhập gói Pro, không dùng API key</td></tr>
   <tr><td>Nơi chạy</td><td>Máy Windows cá nhân, hẹn giờ bằng Task Scheduler</td></tr>
-  <tr><td>Lịch</td><td>01:20 mỗi ngày</td></tr>
+  <tr><td>Lịch</td><td>01:40 mỗi ngày</td></tr>
   <tr><td>Repo đích</td><td>GitHub <code>dinhhuunhatminh/Report-about-AI-Agent-V2-</code>, nhánh <code>main</code></td></tr>
   <tr><td>Phạm vi repo</td><td>Toàn bộ thư mục <code>ResearchAI-AGENT</code> (trừ <code>logs/</code> và <code>state.json</code>)</td></tr>
   <tr><td>Deploy</td><td>GitHub Pages, lấy từ nhánh <code>main</code>, thư mục <code>/docs</code>. Địa chỉ: <code>https://dinhhuunhatminh.github.io/Report-about-AI-Agent-V2-/</code></td></tr>
@@ -973,7 +973,7 @@ Một agent không có log thì không gỡ lỗi được, và không có eval 
 </table>
 
 <h3 id="s9-4">9.4 Luồng hoạt động</h3>
-<div class="diagram">Task Scheduler (01:20 mỗi ngày)
+<div class="diagram">Task Scheduler (01:40 mỗi ngày)
         │ gọi
         ▼
 run-agent.ps1
@@ -1014,7 +1014,7 @@ run-agent.ps1
 
 <h3 id="s9-6">9.6 Kích hoạt theo lịch</h3>
 <table>
-  <tr><th>Tình huống lúc 01:20</th><th>Điều xảy ra</th></tr>
+  <tr><th>Tình huống lúc 01:40</th><th>Điều xảy ra</th></tr>
   <tr><td>Máy bật, đã đăng nhập và mở khóa</td><td>Cửa sổ PowerShell hiện ra, agent chạy rồi đóng</td></tr>
   <tr><td>Máy ngủ hoặc tắt</td><td>Không chạy đúng giờ. Khi máy hoạt động và đã đăng nhập thì chạy bù (<code>StartWhenAvailable</code>)</td></tr>
   <tr><td>Máy ở màn hình khóa chưa đăng nhập</td><td>Chờ đến khi đăng nhập</td></tr>
