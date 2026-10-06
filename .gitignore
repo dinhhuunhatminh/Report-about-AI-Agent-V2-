@@ -8,3 +8,6 @@ research-agent/runs/
 research-agent/memory/*.db
 research-agent/__pycache__/
 **/__pycache__/
+
+# memory
+research-agent/memory/*.db*
