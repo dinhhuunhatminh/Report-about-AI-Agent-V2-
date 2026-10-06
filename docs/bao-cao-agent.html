@@ -144,6 +144,16 @@
         <li><a href="#s9-9">9.9 Hạn chế và việc tiếp theo</a></li>
       </ul>
     </li>
+    <li><a href="#p9">10. Nhận xét: những phần chưa kiểm chứng được ở project test</a>
+      <ul>
+        <li><a href="#s10-1">10.1 Nhận định chung</a></li>
+        <li><a href="#s10-2">10.2 Độ phủ của project test so với phần 1 đến 8</a></li>
+        <li><a href="#s10-3">10.3 Model con cho từng việc</a></li>
+        <li><a href="#s10-4">10.4 Subagent (nhiều agent phối hợp)</a></li>
+        <li><a href="#s10-5">10.5 Các phần quan trọng khác chưa test được</a></li>
+        <li><a href="#s10-6">10.6 Đề xuất bước tiếp theo</a></li>
+      </ul>
+    </li>
   </ul>
 </nav>
 
@@ -1064,6 +1074,87 @@ run-agent.ps1
   <tr><td>Phụ thuộc vào hạn mức và điều khoản của gói Pro</td><td>Kiểm tra lại điều khoản dùng Pro cho tự động hóa. Muốn học phần vòng lặp tự viết thì cần API key riêng</td></tr>
   <tr><td>Vòng lặp agent do Claude Code CLI lo, chưa tự viết</td><td>Bản "agent tự viết" ở mục 2.4 là bước học tiếp theo, cần API key</td></tr>
 </table>
+
+<!-- ===================== 10 ===================== -->
+<h2 id="p9">10. Nhận xét: những phần chưa kiểm chứng được ở project test <span class="tag done">đã viết</span></h2>
+
+<h3 id="s10-1">10.1 Nhận định chung</h3>
+<p>Project test đã chứng minh được <b>khung vận hành</b> của một agent chạy tự động: hẹn giờ, kiểm tra thay đổi, gọi Claude, giới hạn quyền, xác minh kết quả, deploy, ghi trạng thái. Nhưng nó <b>chưa chứng minh được phần "thông minh" của agent</b>, vì ba lý do:</p>
+<table>
+  <tr><th>Lý do</th><th>Giải thích</th></tr>
+  <tr><td>Bài toán quá nhỏ</td><td>Chỉ có một việc cần LLM: đọc thay đổi và viết commit message. Một lần chạy mất 3 đến 5 lượt. Với việc nhỏ như vậy, các kỹ thuật như chia model, chia agent, cắt ngữ cảnh đều chưa có đất dùng</td></tr>
+  <tr><td>Claude Code CLI che mất bên trong</td><td>Vòng lặp, định nghĩa tool, chọn model, quản lý ngữ cảnh đều do CLI lo. Mình chỉ cấu hình từ ngoài nên không quan sát và không điều khiển được từng bước như khi tự viết vòng lặp</td></tr>
+  <tr><td>Chưa có API key và hạ tầng riêng</td><td>Không dùng API nên không tự viết được vòng lặp (mục 2.4) và không đo chi phí thật từng bước. Chưa có sandbox, chưa có hàng đợi hay webhook</td></tr>
+</table>
+<div class="note"><strong>Cách nói trung thực về project này</strong>
+Đây là <b>workflow tự động có một bước dùng LLM</b>, được bọc cẩn thận bằng code. Nó đủ để học khung vận hành, nhưng chưa đủ để nói rằng đã kiểm chứng các khả năng đặc trưng của agent như lập kế hoạch, đổi hướng, phối hợp nhiều agent hay chọn model theo việc.</div>
+
+<h3 id="s10-2">10.2 Độ phủ của project test so với phần 1 đến 8</h3>
+<table>
+  <tr><th>Phần</th><th>Nội dung</th><th>Mức đã kiểm chứng</th><th>Ghi chú</th></tr>
+  <tr><td>2</td><td>Vòng lặp tự viết</td><td><b>Chưa</b></td><td>CLI lo vòng lặp, không thấy <code>tool_use</code> và <code>tool_result</code>. Mã ở mục 2.4 chưa chạy thử</td></tr>
+  <tr><td>3</td><td>Tool: định nghĩa, kiểm tra tham số, MCP</td><td><b>Chưa</b> (MCP) / <b>Một phần</b> (phân quyền)</td><td>Chỉ dùng tool có sẵn của CLI, giới hạn bằng allowlist. Chưa tự khai báo tool, chưa kiểm tra tham số bằng code. Đã thử kết nối GitHub MCP lúc đầu nhưng bỏ vì không cần</td></tr>
+  <tr><td>4</td><td>Điều khiển luồng</td><td><b>Một phần</b></td><td>Có luồng cố định và nhánh dừng sớm. Chưa có lập kế hoạch, thử lại khi lỗi mạng, hay đổi hướng (ví dụ test fail thì để Claude đề xuất sửa)</td></tr>
+  <tr><td>5</td><td>Memory</td><td><b>Một phần</b></td><td><code>state.json</code> chỉ do script ghi đè mỗi lần chạy, <b>Claude không đọc lại</b> nên chưa phải memory theo đúng nghĩa. <code>CLAUDE.md</code> là rule chứ không phải memory học được. Chưa cần cắt ngữ cảnh, chưa dùng embedding</td></tr>
+  <tr><td>6</td><td>Kích hoạt</td><td><b>Có</b> (theo lịch)</td><td>Task Scheduler chạy thật, có khóa chống chồng, có chạy bù. Chưa có webhook, hàng đợi, daemon, nhiều agent</td></tr>
+  <tr><td>7</td><td>An toàn</td><td><b>Một phần</b></td><td>Có allowlist, rule, giới hạn lượt, xác minh độc lập. Chưa có sandbox, chưa có người duyệt, chưa thử prompt injection thật, chưa có trần token, thời gian, ngân sách</td></tr>
+  <tr><td>8</td><td>Quan sát và đánh giá</td><td><b>Một phần</b></td><td>Có log thô, số lượt, chi phí quy đổi. Chưa có trace từng bước, chưa có bộ eval</td></tr>
+</table>
+
+<h3 id="s10-3">10.3 Model con cho từng việc</h3>
+<p><b>Ý tưởng:</b> không dùng một model cho mọi việc. Việc đơn giản, lặp lại dùng model nhỏ và rẻ (như Haiku). Việc khó cần suy luận (đánh giá rủi ro của một thay đổi, sửa lỗi) dùng model mạnh hơn. Cách này giảm chi phí và độ trễ mà không giảm chất lượng ở chỗ quan trọng.</p>
+<table>
+  <tr><th>Câu hỏi</th><th>Tình trạng ở project test</th></tr>
+  <tr><td>Có chọn model theo việc không?</td><td><b>Chưa.</b> Script gọi <code>claude -p</code> với model mặc định cho toàn bộ. Claude Code CLI có tùy chọn chọn model, nên về kỹ thuật làm được, nhưng chưa dùng</td></tr>
+  <tr><td>Vì sao chưa test được?</td><td>Chỉ có <b>một</b> bước LLM, không có việc nào đủ khác nhau về độ khó để phân tầng. Việc viết commit message vốn đã nhẹ, đổi sang model rẻ cũng khó thấy khác biệt</td></tr>
+  <tr><td>Cần đo gì mới kết luận được?</td><td>Chất lượng đầu ra (commit message, nhận diện bí mật), chi phí và thời gian của từng model trên cùng một bộ tình huống. Cần bộ eval ở mục 8.4 và số liệu từng bước ở mục 8.2, hai thứ chưa có</td></tr>
+  <tr><td>Rủi ro của cách làm này</td><td>Model nhỏ có thể bỏ sót chi tiết mà model lớn bắt được (ví dụ một dòng chứa khóa). Cần quy tắc rõ khi nào nâng lên model mạnh, và phải kiểm chứng bằng eval</td></tr>
+</table>
+<p><b>Bài test đề xuất:</b> chia việc thành ba bước. (1) Phân loại thay đổi là tài liệu, code hay cấu hình: model nhỏ. (2) Viết commit message: model nhỏ. (3) Rà soát bí mật và rủi ro khi thay đổi là code hoặc cấu hình: model mạnh. Chạy cùng một bộ tình huống với "một model cho tất cả" rồi so chi phí, thời gian và số lỗi bỏ sót.</p>
+
+<h3 id="s10-4">10.4 Subagent (nhiều agent phối hợp)</h3>
+<p><b>Ý tưởng:</b> một agent chính giao việc cho các agent phụ, mỗi agent phụ có vai trò, bộ tool, quyền và ngữ cảnh riêng (mục 6.6). Lợi ích chính: tách quyền (agent đọc không cần quyền ghi), giữ ngữ cảnh gọn, và làm song song.</p>
+<table>
+  <tr><th>Câu hỏi</th><th>Tình trạng ở project test</th></tr>
+  <tr><td>Có dùng subagent không?</td><td><b>Chưa.</b> Chỉ có một agent làm tất cả, và bộ công cụ được cấp cho agent không bao gồm công cụ gọi agent phụ</td></tr>
+  <tr><td>Vì sao chưa test được?</td><td>Một thay đổi nhỏ không cần chia vai. Chia ra chỉ làm tốn thêm lượt và token. Subagent chỉ có giá trị khi việc đủ lớn (nhiều file cần rà soát) hoặc cần tách quyền rõ ràng</td></tr>
+  <tr><td>Cái gì không quan sát được?</td><td>Việc giao nhận giữa các agent (agent chính nói gì với agent phụ, agent phụ trả gì), chi phí tăng thêm do mỗi agent phụ có ngữ cảnh riêng, và nguy cơ nội dung độc truyền từ agent này sang agent khác</td></tr>
+</table>
+<p><b>Bài test đề xuất:</b> tách hai vai.</p>
+<ul>
+  <li><b>Agent rà soát (chỉ đọc):</b> đọc diff, tìm bí mật và thay đổi đáng ngờ, trả về kết luận dạng ngắn.</li>
+  <li><b>Agent commit (chỉ git):</b> chỉ chạy khi agent rà soát cho qua, không có quyền đọc nội dung file.</li>
+</ul>
+<p>Sau đó thử các tình huống: file chứa khóa giả, file chứa câu lệnh độc trong nội dung, thay đổi lớn nhiều file. Quan sát xem tách quyền có chặn được lỗi mà một agent đơn lẻ có thể mắc hay không, và chi phí tăng bao nhiêu.</p>
+<div class="note"><strong>Lưu ý</strong>
+Claude Code có hỗ trợ subagent, nhưng cách cấu hình cụ thể (tạo thế nào, giới hạn quyền ra sao, chạy được trong chế độ <code>-p</code> hay không) tôi chưa kiểm chứng ở project này. Cần đọc tài liệu hiện hành và thử trước khi dựng bài test.</div>
+
+<h3 id="s10-5">10.5 Các phần quan trọng khác chưa test được</h3>
+<table>
+  <tr><th>Phần chưa test</th><th>Vì sao quan trọng</th><th>Vì sao chưa test được</th></tr>
+  <tr><td>Lập kế hoạch, thử lại, đổi hướng (mục 4)</td><td>Đây là điểm phân biệt agent với workflow: tự xử lý tình huống ngoài dự kiến</td><td>Luồng hiện tại tuyến tính. Gặp lỗi là dừng và báo, chưa có nhánh để Claude tự xoay xở</td></tr>
+  <tr><td>Memory thật sự</td><td>Cho agent học từ các lần chạy trước (lỗi đã gặp, quy ước riêng)</td><td>Claude không đọc <code>state.json</code> hay lịch sử. Mỗi lần chạy là một lần "mất trí nhớ"</td></tr>
+  <tr><td>Tool tự viết và kiểm tra tham số (mục 3)</td><td>Kiểm soát chính xác từng lần gọi, không chỉ theo tên lệnh</td><td>Dùng công cụ dựng sẵn, cần tự viết vòng lặp bằng API mới có</td></tr>
+  <tr><td>Chống prompt injection thực tế (mục 7.6)</td><td>Rủi ro đặc thù của agent, khi nó đọc nội dung do người khác viết</td><td>Chưa thử đưa file chứa lệnh độc vào để xem rule và allowlist có chặn được không</td></tr>
+  <tr><td>Sandbox và người duyệt (mục 7.2, 7.4)</td><td>Giới hạn thiệt hại khi agent làm sai</td><td>Agent chạy trực tiếp trên máy bằng quyền của bạn và push thẳng vào <code>main</code>. Hiện chỉ có allowlist và xác minh sau khi xong</td></tr>
+  <tr><td>Trần token, thời gian, ngân sách (mục 7.5)</td><td>Chặn chi phí vượt kiểm soát</td><td>Mới có <code>--max-turns</code>. Gói Pro tính theo hạn mức, chưa có cách đo và chặn theo ngân sách</td></tr>
+  <tr><td>Trace và eval (mục 8)</td><td>Biết agent làm gì, và biết thay đổi có làm nó tốt hơn hay tệ đi</td><td>Chỉ có log thô. Chưa có bộ bài test với các tình huống lỗi</td></tr>
+  <tr><td>Kích hoạt theo sự kiện, hàng đợi (mục 6.3 đến 6.5)</td><td>Phản ứng tức thì thay vì chờ lịch</td><td>Chưa có nguồn sự kiện thật. Deploy cũng chỉ là site tĩnh</td></tr>
+</table>
+
+<h3 id="s10-6">10.6 Đề xuất bước tiếp theo</h3>
+<p>Sắp theo thứ tự nên làm, từ rẻ và có ích ngay đến tốn công:</p>
+<table>
+  <tr><th>#</th><th>Việc</th><th>Cần API key?</th><th>Kết quả học được</th></tr>
+  <tr><td>1</td><td>Thử hai tình huống lỗi cố ý: test fail và file chứa lệnh độc</td><td>Không</td><td>Kiểm chứng allowlist, rule và bước xác minh có hoạt động như thiết kế</td></tr>
+  <tr><td>2</td><td>Cho agent đọc lại lịch sử các lần chạy (memory thật) và dùng nó khi viết commit</td><td>Không</td><td>Hiểu cách đưa memory dài hạn vào ngữ cảnh</td></tr>
+  <tr><td>3</td><td>Thêm nhánh "test fail thì Claude đề xuất sửa, tối đa 2 lần" và thử lại khi push lỗi mạng</td><td>Không</td><td>Điều khiển luồng: thử lại và đổi hướng</td></tr>
+  <tr><td>4</td><td>Ghi trace từng bước và dựng 4 đến 5 bài eval</td><td>Không (với script bọc ngoài)</td><td>Quan sát và đánh giá, nền tảng để so sánh các phương án sau</td></tr>
+  <tr><td>5</td><td>Thử chọn model theo việc (mục 10.3) và tách subagent rà soát và commit (mục 10.4), đo chi phí và chất lượng bằng eval ở bước 4</td><td>Không chắc, cần kiểm tra khả năng của CLI</td><td>Hai phần quan trọng nhất còn thiếu</td></tr>
+  <tr><td>6</td><td>Tự viết vòng lặp agent với tool tự khai báo, chia model và subagent bằng mã</td><td><b>Có</b></td><td>Toàn bộ cơ chế bên trong mà CLI đang che</td></tr>
+</table>
+<div class="note"><strong>Điều cần nhớ</strong>
+Đừng thêm model con hay subagent chỉ vì "agent thật thì phải có". Hãy đo trước: có eval và trace rồi mới biết chia ra có tốt hơn không, và tốt hơn bao nhiêu. Thứ tự đúng là quan sát và đánh giá trước, tối ưu sau.</div>
 
 </div>
 </body>
