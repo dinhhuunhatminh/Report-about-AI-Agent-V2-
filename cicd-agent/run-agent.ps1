@@ -3,7 +3,7 @@
 # Keep this file ASCII-only: Windows PowerShell 5.1 misreads UTF-8 without BOM.
 
 param(
-    [string]$RepoPath   = $PSScriptRoot,   # the whole ResearchAI-AGENT folder is the repo
+    [string]$RepoPath   = (Split-Path $PSScriptRoot -Parent),   # repo root = parent of cicd-agent/
     [string]$Branch     = 'main',      # user approved direct pushes to main
     [string]$TestCmd    = '',          # e.g. 'npm test' or 'python -m pytest'; empty = skip tests
     [int]$MaxTurns      = 12,
@@ -126,10 +126,13 @@ try {
     $before = (git rev-parse HEAD).Trim()
 
     # ---- step 4: Claude writes the message, commits, pushes (limited tools) ----
-    $prompt = "Follow the CI/CD rules in CLAUDE.md. Review the uncommitted changes in this repo, commit them with a Conventional Commits message, and push to origin $Branch."
+    $RulesFile = Join-Path $AgentDir 'rules.md'
+    if (-not (Test-Path $RulesFile)) { throw "Rules file missing: $RulesFile" }
+    $prompt = "Follow the CI/CD rules you were given. Review the uncommitted changes in this repo, commit them with a Conventional Commits message, and push to origin $Branch."
     Log "Calling claude -p (max turns $MaxTurns)"
     $raw = claude -p $prompt `
         --allowedTools 'Read' 'Bash(git status *)' 'Bash(git diff *)' 'Bash(git add *)' 'Bash(git commit *)' "Bash(git push origin $Branch)" 'Bash(git log *)' `
+        --append-system-prompt-file $RulesFile `
         --max-turns $MaxTurns `
         --output-format json 2>&1
     $claudeExit = $LASTEXITCODE

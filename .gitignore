@@ -1,4 +1,10 @@
-# runtime data written by run-agent.ps1 after each run; must not be committed or every run would see 'changes'
-logs/
-state.json
+# runtime data written by cicd-agent/run-agent.ps1 after each run; must not be committed
+# or every run would see 'changes'
+cicd-agent/logs/
+cicd-agent/state.json
 
+# runtime data of research-agent (later phases)
+research-agent/runs/
+research-agent/memory/*.db
+research-agent/__pycache__/
+**/__pycache__/
