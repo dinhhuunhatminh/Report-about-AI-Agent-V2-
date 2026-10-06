@@ -6,7 +6,17 @@ import argparse
 import sys
 
 from agent import DEFAULT_BUDGET_CHARS, run_agent
+from guard import Policy
 from memory import LongTerm
+
+
+def ask_human(action, args, reason):
+    """Người duyệt: guard nghi ngờ một hành động và hỏi bạn. Không trả lời được (không có bàn phím) thì từ chối."""
+    print(f"\n[GUARD HỎI] {reason}\n  hành động: {action} {args}")
+    try:
+        return input("  Cho phép? [y/N] ").strip().lower() in ("y", "yes", "có", "co")
+    except EOFError:
+        return False
 
 
 def main():
@@ -16,6 +26,13 @@ def main():
     parser.add_argument("--max-steps", type=int, default=8, help="Số bước tối đa (mặc định 8)")
     parser.add_argument("--model", default=None, help="Tên model (mặc định: model của tài khoản)")
     parser.add_argument("--no-memory", action="store_true", help="Không đọc/ghi trí nhớ dài hạn")
+    parser.add_argument("--ask", action="store_true",
+                        help="Hỏi bạn trước khi chạy hành động guard nghi ngờ (mặc định: tự động từ chối)")
+    parser.add_argument("--injection", choices=["mark", "remove", "off"], default="mark",
+                        help="Xử lý câu nghi chứa lệnh gài trong nội dung web: mark (đánh dấu, mặc định), "
+                             "remove (xóa câu), off (không làm gì)")
+    parser.add_argument("--no-defense", action="store_true",
+                        help="TẮT cách ly injection và luật nguồn URL. Chỉ để thử nghiệm so sánh, đừng dùng khi chạy thật")
     parser.add_argument("--budget", type=int, default=DEFAULT_BUDGET_CHARS,
                         help="Chỉ cắt gọn lịch sử khi tổng kết quả tool vượt số ký tự này (0 = không bao giờ cắt)")
     args = parser.parse_args()
@@ -23,7 +40,9 @@ def main():
     print(f"CÂU HỎI: {args.question}\n")
     memory = None if args.no_memory else LongTerm()
     budget = args.budget if args.budget > 0 else None
-    result = run_agent(args.question, max_steps=args.max_steps, model=args.model, memory=memory, budget_chars=budget)
+    policy = Policy(injection_mode="off" if args.no_defense else args.injection, enforce_url_provenance=not args.no_defense)
+    result = run_agent(args.question, max_steps=args.max_steps, model=args.model, memory=memory,
+                       budget_chars=budget, policy=policy, approver=ask_human if args.ask else None)
 
     print("\n" + "=" * 60)
     print(f"TRẠNG THÁI: {result['status']}")
@@ -47,6 +66,11 @@ def main():
     if memory is not None:
         print(f"TRÍ NHỚ DÀI HẠN: gợi ý đọc lại {result['recalled']}; "
               f"đã ghi thêm {result.get('memory_added')}; tổng {memory.stats()}")
+    g = result.get("guard", {})
+    if g.get("denied") or g.get("asked") or g.get("injection_sentences_flagged") or result.get("error"):
+        print(f"\nGUARD: chặn {g.get('denied', 0)}, hỏi người {g.get('asked', 0)} (duyệt {g.get('approved', 0)}), "
+              f"phát hiện {g.get('injection_sentences_flagged', 0)} câu nghi chứa chỉ thị"
+              + (f"; DỪNG vì {result['error']}" if result["status"] == "budget_exceeded" else ""))
     print(f"\nTRACE: {result['trace_path']}")
     t = result["totals"]
     print(f"\nTHỐNG KÊ: {result['steps']} bước, {t['llm_calls']} lần gọi LLM, "

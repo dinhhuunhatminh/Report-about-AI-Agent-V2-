@@ -11,8 +11,10 @@ Giai đoạn 3: memory (memory.py)
 """
 import time
 
+import guard
 import llm
 import verify
+from guard import Decision, GuardState, Policy
 from memory import ShortTerm, compact_history
 from prompts import build_system_prompt, build_user_prompt
 from schema import validate
@@ -37,17 +39,26 @@ DECISION_SCHEMA = {
 }
 
 
-def run_agent(question, max_steps=8, model=None, emit=print, trace=None, memory=None, budget_chars=DEFAULT_BUDGET_CHARS):
+def run_agent(question, max_steps=8, model=None, emit=print, trace=None, memory=None,
+              budget_chars=DEFAULT_BUDGET_CHARS, policy=None, approver=None):
     """Chạy agent cho một câu hỏi. Trả về dict kết quả (status, answer, citations, thống kê, run_id).
 
     memory:    một LongTerm (trí nhớ dài hạn) hoặc None để chạy không có trí nhớ dài hạn.
     budget_chars: chỉ cắt gọn lịch sử khi tổng kết quả tool vượt số ký tự này; None để không bao giờ cắt.
+    policy:    guard.Policy (luật và ngân sách); mặc định là cấu hình an toàn đầy đủ.
+    approver:  hàm approver(action, args, reason) -> True/False cho các lần guard hỏi người. None nghĩa là
+               không có người duyệt (chạy tự động): mọi lần guard "hỏi" đều bị từ chối.
     """
     trace = trace or Trace()
+    policy = policy or Policy()
+    gstate = GuardState(question, policy)
     system_prompt = build_system_prompt(REGISTRY, CONTEXT_TOOLS)
     history = []
     short_term = ShortTerm()
-    ctx = {"pages": {}}          # các trang web đã tải trong lần chạy này (nguyên văn), để kiểm tra trích dẫn
+    # ctx: trang web đã tải (nguyên văn, để kiểm tra trích dẫn) + công tắc cách ly injection + danh sách phát hiện
+    ctx = {"pages": {}, "injection_mode": policy.injection_mode, "findings": []}
+    findings_logged = 0
+    approved_count = 0
 
     def citable_docs():
         """Nguồn được phép trích dẫn: kho nội bộ + trang web đã tải trong lần chạy này."""
@@ -60,7 +71,11 @@ def run_agent(question, max_steps=8, model=None, emit=print, trace=None, memory=
               "recalled": {"similar": 0, "facts": 0, "lessons": 0, "stale_skipped": 0}}
 
     trace.log("run_start", question=question, max_steps=max_steps, model=model, budget_chars=budget_chars,
-              long_term_memory=memory is not None, system_prompt_chars=len(system_prompt))
+              long_term_memory=memory is not None, system_prompt_chars=len(system_prompt),
+              policy={"injection_mode": policy.injection_mode, "enforce_url_provenance": policy.enforce_url_provenance,
+                      "max_fetches": policy.max_fetches, "max_seconds": policy.max_seconds,
+                      "max_input_tokens": policy.max_input_tokens},
+              interactive_approver=approver is not None)
 
     # ---- ĐỌC LẠI trí nhớ dài hạn (một lần, đầu lần chạy)
     recall_text = ""
@@ -74,6 +89,12 @@ def run_agent(question, max_steps=8, model=None, emit=print, trace=None, memory=
             emit(f"[trí nhớ] gợi ý từ các lần trước: {result['recalled']}")
 
     for step in range(1, max_steps + 1):
+        stop_reason = guard.check_budget(gstate, totals)
+        if stop_reason:                       # hết ngân sách thời gian hoặc token: dừng cả lần chạy
+            emit(f"[guard] DỪNG: {stop_reason}")
+            trace.log("budget_exceeded", step=step, reason=stop_reason)
+            result.update(status="budget_exceeded", error=stop_reason, steps=step - 1)
+            break
         steps_left = max_steps - step + 1
         user_prompt = build_user_prompt(question, compact_history(history, budget_chars), steps_left,
                                         notes_text=short_term.render(), recall_text=recall_text)
@@ -140,9 +161,47 @@ def run_agent(question, max_steps=8, model=None, emit=print, trace=None, memory=
                             "duplicate": "Ghi chú này đã có rồi.",
                             "full": "KHÔNG LƯU: đã đủ số ghi chú tối đa."}[outcome]
         else:
-            started = time.perf_counter()
-            ok, text = run_tool(action, args, ctx)
-            tool_ms = int((time.perf_counter() - started) * 1000)
+            # ---- GUARD: mọi tool thường đều phải qua cửa này trước khi chạy
+            decision = guard.check_call(action, args, gstate, ctx["pages"])
+            if decision.verdict == "ask":
+                gstate.asked += 1
+                approved = bool(approver(action, args, decision.reason)) if approver else False
+                trace.log("guard", step=step, action=action, args=args, verdict="ask",
+                          approved=approved, interactive=approver is not None, reason=decision.reason)
+                emit(f"          [guard] cần duyệt: {decision.reason} -> {'ĐƯỢC DUYỆT' if approved else 'TỪ CHỐI'}")
+                if approved:
+                    approved_count += 1
+                    decision = Decision("allow")
+                else:
+                    why = "người dùng từ chối" if approver else "chạy tự động, không có người duyệt"
+                    decision = Decision("deny", f"{decision.reason} ({why})")
+            elif decision.verdict == "deny":
+                trace.log("guard", step=step, action=action, args=args, verdict="deny", reason=decision.reason)
+                emit(f"          [guard] CHẶN: {decision.reason}")
+
+            if decision.verdict == "deny":
+                gstate.denied += 1
+                ok, text = False, f"BỊ CHẶN BỞI GUARD: {decision.reason}"
+            else:
+                is_new_fetch = action == "fetch_url" and guard.norm_url(args.get("url", "")) not in {
+                    guard.norm_url(u) for u in ctx["pages"]}
+                gstate.register(action, args, is_new_fetch)
+                started = time.perf_counter()
+                ok, text = run_tool(action, args, ctx)
+                tool_ms = int((time.perf_counter() - started) * 1000)
+                if ok and action in ("search_web", "fetch_url"):
+                    gstate.note_web_result(text)
+                    if action == "search_web":
+                        gstate.note_search_results(text)
+
+            # phát hiện injection mới (do web.py cách ly) được ghi vào trace
+            if len(ctx["findings"]) > findings_logged:
+                fresh = ctx["findings"][findings_logged:]
+                findings_logged = len(ctx["findings"])
+                trace.log("injection_found", step=step, mode=policy.injection_mode, count=len(fresh),
+                          findings=fresh[:5])
+                emit(f"          [injection] ({policy.injection_mode}) phát hiện {len(fresh)} câu nghi chứa chỉ thị: "
+                     f"{', '.join(sorted({f['rule'] for f in fresh}))}")
 
         if len(text) > MAX_RESULT_CHARS:
             text = text[:MAX_RESULT_CHARS] + "\n...(đã cắt bớt)"
@@ -155,6 +214,9 @@ def run_agent(question, max_steps=8, model=None, emit=print, trace=None, memory=
     result["history"] = history
     result["notes"] = list(short_term.notes)
     result["web_pages"] = sorted({p["url"] for p in ctx["pages"].values()})
+    result["guard"] = {"denied": gstate.denied, "asked": gstate.asked, "approved": approved_count,
+                       "injection_sentences_flagged": len(ctx["findings"]), "web_fetches": gstate.fetches,
+                       "web_chars": gstate.web_chars}
 
     # ---- GHI trí nhớ dài hạn (cuối lần chạy; chỉ phần đã kiểm chứng, xem memory.record_run)
     if memory is not None:
@@ -166,6 +228,6 @@ def run_agent(question, max_steps=8, model=None, emit=print, trace=None, memory=
     result["check_failure_kinds"] = sorted(result["check_failure_kinds"])
     trace.log("run_end", status=result["status"], steps=result["steps"], totals=totals,
               answer=result["answer"], model=result["model"], notes=len(short_term.notes),
-              web_pages=result["web_pages"])
+              web_pages=result["web_pages"], guard=result["guard"])
     trace.write_answer(render_answer_md(question, result))
     return result

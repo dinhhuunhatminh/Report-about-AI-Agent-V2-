@@ -43,6 +43,14 @@ def main():
             if e["problems"]:
                 detail += " | " + "; ".join(e["problems"])
             print(f"{step:<5}{kind:<17}{short(detail, 60):<62}")
+        elif kind == "guard":
+            detail = "%s %s: %s" % (e["verdict"].upper(), e["action"], e["reason"])
+            print(f"{step:<5}{kind:<17}{short(detail, 60):<62}")
+        elif kind == "injection_found":
+            rules = ", ".join(sorted({f["rule"] for f in e["findings"]}))
+            print(f"{step:<5}{kind:<17}{short('%s: %d câu: %s' % (e.get('mode', '?'), e['count'], rules), 60):<62}")
+        elif kind == "budget_exceeded":
+            print(f"{step:<5}{kind:<17}{short(e['reason'], 60):<62}")
         elif kind == "memory_recall":
             recalled = {k: e[k] for k in ("similar", "facts", "lessons", "stale_skipped")}
             print(f"{'':<5}{kind:<17}{short('đọc lại: ' + str(recalled), 60):<62}")
